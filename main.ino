@@ -12,10 +12,16 @@
 #define RF69_RST 2
 #define RF69_FREQ RF69_433MHZ
 
-#define ADE_CS_PIN 15
-#define ADE_IRQ_PIN 16
-#define ADE_RST_PIN 17
+// ADE7953 PIN CONFIGURATION - UPDATED FOR ESP32
+#define ADE_CS_PIN 13
+#define ADE_IRQ_PIN 34
+#define ADE_RST_PIN 32
 #define ADE_SPI_SPEED 1000000
+
+// ESP32 SPI PINS (using default VSPI)
+#define ADE_MOSI 23
+#define ADE_MISO 19
+#define ADE_SCK 18
 
 // ADE7953 CONFIGURATION
 #define ADE_XTAL_FREQ 3500000 // 3.5 MHz crystal frequency
@@ -147,9 +153,14 @@ void setup()
   digitalWrite(BUZZER_PIN, LOW);
 
   Wire.begin();
-  SPI.begin();
+  
+  // Initialize SPI with custom pins for ADE7953
+  SPI.begin(ADE_SCK, ADE_MISO, ADE_MOSI, ADE_CS_PIN);
+  Serial.println("⚙️  SPI initialized with custom pins:");
+  Serial.printf("    MOSI: %d, MISO: %d, SCK: %d, CS: %d\n", 
+                ADE_MOSI, ADE_MISO, ADE_SCK, ADE_CS_PIN);
 
-  Serial.println("⚙️  Starting Hardware Tests...\n");
+  Serial.println("\n⚙️  Starting Hardware Tests...\n");
   delay(500);
 
   // Run comprehensive tests
@@ -163,17 +174,17 @@ void setup()
   Serial.println("\n╔════════════════════════════════════════════╗");
   Serial.println("║           TEST SUMMARY                     ║");
   Serial.println("╚════════════════════════════════════════════╝");
-  Serial.printf("  RTC DS3231:    %s\n", rtcOK ? " PASS" : "X FAIL");
-  Serial.printf("  RFM69 Radio:   %s\n", rfmOK ? " PASS" : "X FAIL");
-  Serial.printf("  Relay:         %s\n", relayOK ? " PASS" : "X FAIL");
-  Serial.printf("  Buzzer:        %s\n", buzzerOK ? " PASS" : "X FAIL");
-  Serial.printf("  ADE7953:       %s\n", adeOK ? " PASS" : "X FAIL");
+  Serial.printf("  RTC DS3231:    %s\n", rtcOK ? "✓ PASS" : "✗ FAIL");
+  Serial.printf("  RFM69 Radio:   %s\n", rfmOK ? "✓ PASS" : "✗ FAIL");
+  Serial.printf("  Relay:         %s\n", relayOK ? "✓ PASS" : "✗ FAIL");
+  Serial.printf("  Buzzer:        %s\n", buzzerOK ? "✓ PASS" : "✗ FAIL");
+  Serial.printf("  ADE7953:       %s\n", adeOK ? "✓ PASS" : "✗ FAIL");
   Serial.println("════════════════════════════════════════════\n");
 
   if (adeOK)
   {
-    Serial.println(" ADE7953 is ready for continuous monitoring");
-    Serial.println(" Real-time data will be displayed every 2 seconds\n");
+    Serial.println("✓ ADE7953 is ready for continuous monitoring");
+    Serial.println("  Real-time data will be displayed every 2 seconds\n");
   }
 }
 
@@ -201,13 +212,13 @@ void loop()
 
   if (rtcIRQTriggered)
   {
-    Serial.println(" RTC Alarm Triggered!");
+    Serial.println("RTC Alarm Triggered!");
     rtcIRQTriggered = false;
   }
 
   if (rfmIRQTriggered)
   {
-    Serial.println(" RFM69 Interrupt!");
+    Serial.println("RFM69 Interrupt!");
     rfmIRQTriggered = false;
   }
 }
@@ -222,38 +233,38 @@ bool testRTC()
 
   if (!rtc.begin())
   {
-    Serial.println("X RTC not detected on I2C bus!");
+    Serial.println("✗ RTC not detected on I2C bus!");
     return false;
   }
-  Serial.println(" RTC detected on I2C");
+  Serial.println("✓ RTC detected on I2C");
 
   if (rtc.lostPower())
   {
-    Serial.println("  RTC lost power - setting current time");
+    Serial.println("⚠  RTC lost power - setting current time");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
   DateTime now = rtc.now();
-  Serial.printf(" Current Time: %04d-%02d-%02d %02d:%02d:%02d\n",
+  Serial.printf("✓ Current Time: %04d-%02d-%02d %02d:%02d:%02d\n",
                 now.year(), now.month(), now.day(),
                 now.hour(), now.minute(), now.second());
 
   // Test temperature sensor
   float temp = rtc.getTemperature();
-  Serial.printf(" Temperature: %.2f°C\n", temp);
+  Serial.printf("✓ Temperature: %.2f°C\n", temp);
 
   // Verify time stability
   delay(1100);
   DateTime now2 = rtc.now();
   int diffSec = now2.unixtime() - now.unixtime();
-  Serial.printf(" Time stability: %d second(s) elapsed\n", diffSec);
+  Serial.printf("✓ Time stability: %d second(s) elapsed\n", diffSec);
 
   if (diffSec < 1 || diffSec > 2)
   {
-    Serial.println("  Warning: Time drift detected!");
+    Serial.println("⚠  Warning: Time drift detected!");
   }
 
-  Serial.println(" RTC Test Complete\n");
+  Serial.println("✓ RTC Test Complete\n");
   return true;
 }
 
@@ -273,33 +284,33 @@ bool testRFM69()
 
   if (!radio.initialize(RF69_433MHZ, 1, 100))
   {
-    Serial.println("X RFM69 initialization failed!");
+    Serial.println("✗ RFM69 initialization failed!");
     return false;
   }
-  Serial.println(" RFM69 initialized");
+  Serial.println("✓ RFM69 initialized");
 
   radio.setHighPower();
   radio.setPowerLevel(31);
-  Serial.println(" High power mode enabled");
+  Serial.println("✓ High power mode enabled");
 
   // Test transmission
   const char *testMsg = "XENSE_TEST";
   radio.send(1, testMsg, strlen(testMsg));
-  Serial.printf(" Test packet sent: '%s'\n", testMsg);
+  Serial.printf("✓ Test packet sent: '%s'\n", testMsg);
 
   // Read RSSI
   int16_t rssi = radio.readRSSI();
-  Serial.printf(" RSSI: %d dBm\n", rssi);
+  Serial.printf("✓ RSSI: %d dBm\n", rssi);
 
   // Test promiscuous mode
   radio.spyMode(true);
   radio.writeReg(0x29, 0x00);
   radio.writeReg(0x2E, 0x88);
-  Serial.println(" Promiscuous mode enabled");
+  Serial.println("✓ Promiscuous mode enabled");
 
-  Serial.printf(" Temperature: %d°C\n", radio.readTemperature(0));
+  Serial.printf("✓ Temperature: %d°C\n", radio.readTemperature(0));
 
-  Serial.println(" RFM69 Test Complete\n");
+  Serial.println("✓ RFM69 Test Complete\n");
   return true;
 }
 
@@ -318,7 +329,7 @@ bool testRelay()
   // Basic switching test
   for (int i = 0; i < 5; i++)
   {
-    Serial.printf(" Cycle %d: ON", i + 1);
+    Serial.printf("✓ Cycle %d: ON", i + 1);
     digitalWrite(RELAY_PIN, HIGH);
     delay(500);
     Serial.print(" -> OFF\n");
@@ -327,10 +338,10 @@ bool testRelay()
   }
 
   // Stress test option
-  Serial.println("\n  Stress Test: 100 rapid cycles");
+  Serial.println("\n⚡ Stress Test: 100 rapid cycles");
   stressTestRelay();
 
-  Serial.println(" Relay Test Complete\n");
+  Serial.println("✓ Relay Test Complete\n");
   return true;
 }
 
@@ -347,7 +358,7 @@ void stressTestRelay()
       Serial.printf("  %d/100...\n", i);
   }
   unsigned long duration = millis() - startTime;
-  Serial.printf(" Completed in %lu ms\n", duration);
+  Serial.printf("✓ Completed in %lu ms\n", duration);
 }
 
 // BUZZER TEST
@@ -372,7 +383,7 @@ bool testBuzzer()
   Serial.println("♪ Testing alarm pattern...");
   testBuzzerTones();
 
-  Serial.println(" Buzzer Test Complete\n");
+  Serial.println("✓ Buzzer Test Complete\n");
   return true;
 }
 
@@ -401,58 +412,61 @@ bool testADE()
   pinMode(ADE_RST_PIN, OUTPUT);
   digitalWrite(ADE_RST_PIN, HIGH);
 
+  Serial.printf("✓ ADE7953 pins configured: CS=%d, RST=%d, IRQ=%d\n", 
+                ADE_CS_PIN, ADE_RST_PIN, ADE_IRQ_PIN);
+
   adeReset();
   delay(100);
 
   // Read Product ID
   uint16_t prodID = adeRead16(ADE_PRODID);
-  Serial.printf(" Product ID: 0x%04X ", prodID);
+  Serial.printf("ℹ Product ID: 0x%04X ", prodID);
 
   if (prodID != 0x7953)
   {
-    Serial.println("X Invalid! (Expected 0x7953)");
+    Serial.println("✗ Invalid! (Expected 0x7953)");
     return false;
   }
-  Serial.println("(Valid)");
+  Serial.println("✓ (Valid)");
 
   // Initialize ADE
   adeInit();
-  Serial.println(" ADE7953 initialized");
+  Serial.println("✓ ADE7953 initialized");
 
   // Setup interrupts
   setupADEInterrupt();
-  Serial.println("Interrupt configured");
+  Serial.println("✓ Interrupt configured");
 
   // Test communication
-  Serial.println("\n Testing register access...");
+  Serial.println("\n✓ Testing register access...");
   adeWrite16(ADE_LINECYC, 200);
   uint16_t readBack = adeRead16(ADE_LINECYC);
   Serial.printf("  Write: 200, Read: %d ", readBack);
   if (readBack == 200)
   {
-    Serial.println("");
+    Serial.println("✓");
   }
   else
   {
-    Serial.println("X");
+    Serial.println("✗");
     return false;
   }
 
   // Calibration test
-  Serial.println("\n Running calibration check...");
+  Serial.println("\n✓ Running calibration check...");
   calibrateADE();
 
   // Accuracy test with AC power
-  Serial.println("\n LIVE AC POWER TEST");
+  Serial.println("\n⚡ LIVE AC POWER TEST");
   Serial.println("   Connect known load for accuracy test");
   delay(2000);
   testADEAccuracy();
 
   // Interrupt test
-  Serial.println("\n Testing interrupt generation...");
+  Serial.println("\n✓ Testing interrupt generation...");
   testADEInterrupts();
 
-  Serial.println("ADE7953 Test Complete\n");
+  Serial.println("✓ ADE7953 Test Complete\n");
   return true;
 }
 
@@ -463,7 +477,7 @@ void adeReset()
   delay(10);
   digitalWrite(ADE_RST_PIN, HIGH);
   delay(100);
-  Serial.println("ADE7953 hardware reset");
+  Serial.println("✓ ADE7953 hardware reset");
 }
 
 // ADE INITIALIZATION
@@ -482,7 +496,7 @@ void adeInit()
   // Set computation mode
   adeWrite16(ADE_COMPMODE, 0x01FF); // Enable all measurements
 
-  Serial.printf("DE configured for %.2f MHz crystal\n", ADE_XTAL_FREQ / 1000000.0);
+  Serial.printf("✓ ADE configured for %.2f MHz crystal\n", ADE_XTAL_FREQ / 1000000.0);
 }
 
 // ADE INTERRUPT SETUP
@@ -510,7 +524,7 @@ void calibrateADE()
   // 2. Calculate gain factors
   // 3. Write back to gain registers
 
-  Serial.println(" *  Using default calibration (adjust with known reference)");
+  Serial.println("ℹ  Using default calibration (adjust with known reference)");
 }
 
 // ACCURACY TEST
@@ -569,12 +583,12 @@ void testADEInterrupts()
 
   if (adeIRQTriggered)
   {
-    Serial.println("Interrupt working!");
+    Serial.println("✓ Interrupt working!");
     adeIRQTriggered = false;
   }
   else
   {
-    Serial.println("No interrupt detected");
+    Serial.println("⚠ No interrupt detected");
   }
 }
 

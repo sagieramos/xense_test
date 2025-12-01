@@ -24,63 +24,67 @@
 #define ADE_SCK 18
 
 // ADE7953 CONFIGURATION
-#define ADE_XTAL_FREQ 3500000 // 3.5 MHz crystal frequency
+#define ADE_XTAL_FREQ 8192000 // Nominal 3.579545 MHz crystal frequency
 // For 8.192 MHz: use 8192000
-// For 3.5 MHz: use 3500000
+// For 3.5 MHz: use 3579545
 
-// ADE7953 REGISTERS
-
-// Voltage/Current RMS
-#define ADE_AVRMS 0x31A // Channel A RMS voltage
-#define ADE_AIRMS 0x31B // Channel A RMS current
+// ADE7953 REGISTERS - CORRECTED ADDRESSES
+// Voltage/Current RMS (24-bit unsigned)
+#define ADE_AVRMS 0x21C // Channel A RMS voltage
+#define ADE_AIRMS 0x21A // Channel A RMS current
 #define ADE_BVRMS 0x31C // Channel B RMS voltage
-#define ADE_BIRMS 0x31D // Channel B RMS current
+#define ADE_BIRMS 0x31A // Channel B RMS current
 
-// Power Registers
-#define ADE_AWATT 0x312 // Channel A active power
-#define ADE_BWATT 0x313 // Channel B active power
-#define ADE_AVA 0x310   // Channel A apparent power
-#define ADE_BVA 0x311   // Channel B apparent power
-#define ADE_AVAR 0x314  // Channel A reactive power
-#define ADE_BVAR 0x315  // Channel B reactive power
+// Power Registers (24-bit signed for AWATT/BWATT/AVAR/BVAR; unsigned for AVA/BVA)
+#define ADE_AWATT 0x212 // Channel A active power
+#define ADE_BWATT 0x312 // Channel B active power
+#define ADE_AVA 0x210   // Channel A apparent power
+#define ADE_BVA 0x310   // Channel B apparent power
+#define ADE_AVAR 0x214  // Channel A reactive power
+#define ADE_BVAR 0x314  // Channel B reactive power
 
-// Energy Registers
-#define ADE_AWATTHR 0x31E // Channel A active energy
-#define ADE_BWATTHR 0x31F // Channel B active energy
-#define ADE_AVAHR 0x320   // Channel A apparent energy
-#define ADE_BVAHR 0x321   // Channel B apparent energy
+// Energy Registers (24-bit signed) - Corrected though unused
+#define ADE_AWATTHR 0x21E // Channel A active energy
+#define ADE_BWATTHR 0x31E // Channel B active energy
+#define ADE_AVAHR 0x220   // Channel A apparent energy
+#define ADE_BVAHR 0x320   // Channel B apparent energy
 
 // Configuration
-#define ADE_LCYCMODE 0x004 // Line cycle mode
-#define ADE_LINECYC 0x101  // Number of half line cycles
-#define ADE_CONFIG 0x102   // Configuration register
-#define ADE_CFMODE 0x107   // Configuration mode
-#define ADE_COMPMODE 0x105 // Computation mode
+#define ADE_LCYCMODE 0x004 // Line cycle mode (8-bit)
+#define ADE_LINECYC 0x101  // Number of half line cycles (16-bit)
+#define ADE_CONFIG 0x102   // Configuration register (16-bit)
+#define ADE_CFMODE 0x107   // CF mode (16-bit)
+// Removed invalid COMPMODE 0x105
 
-// Calibration
-#define ADE_AVGAIN 0x380   // Channel A voltage gain
-#define ADE_AIGAIN 0x381   // Channel A current gain
+// Calibration (24-bit unsigned)
+#define ADE_AVGAIN 0x381   // Channel A voltage gain
+#define ADE_AIGAIN 0x380   // Channel A current gain
 #define ADE_AWGAIN 0x382   // Channel A watt gain
 #define ADE_AVARGAIN 0x383 // Channel A var gain
-#define ADE_AVRMSOS 0x388  // Channel A voltage offset
-#define ADE_AIRMSOS 0x389  // Channel A current offset
+#define ADE_AVRMSOS 0x388  // Channel A voltage offset (24-bit signed)
+#define ADE_AIRMSOS 0x386  // Channel A current offset (24-bit signed)
 
-// Status/Control
-#define ADE_IRQ0 0x22C   // Interrupt status 0
-#define ADE_IRQ1 0x22D   // Interrupt status 1
-#define ADE_IRQEN0 0x22A // Interrupt enable 0
-#define ADE_IRQEN1 0x22B // Interrupt enable 1
-#define ADE_PERIOD 0x301 // Line period
+// Status/Control (24-bit)
+#define ADE_IRQSTATA 0x22D // Interrupt status A
+#define ADE_IRQSTATB 0x32D // Interrupt status B
+#define ADE_IRQENA 0x22C   // Interrupt enable A
+#define ADE_IRQENB 0x22F   // Interrupt enable B
+#define ADE_RSTIRQSTATA 0x22E // Reset interrupt status A
+#define ADE_PERIOD 0x10E   // Line period (16-bit)
 
 // Product ID
-#define ADE_PRODID 0x702 // Product ID (should be 0x7953)
+#define ADE_PRODID 0x702 // Product ID (16-bit, 0x7953)
+
+// Unlock registers
+#define ADE_UNLOCK 0x00FE
+#define ADE_LOCK_REG 0x0120
 
 // MODULE INSTANCES
 RTC_DS3231 rtc;
 RFM69 radio(RF69_CS, RF69_INT);
 
 // GLOBAL FLAGS & DATA
-volatile bool adeIRQTriggered = false;
+volatile bool adeIRQTriggered = true;
 volatile bool rtcIRQTriggered = false;
 volatile bool rfmIRQTriggered = false;
 
@@ -91,7 +95,7 @@ struct ADEData
   int32_t wattA, wattB;
   int32_t varA, varB;
   uint32_t vaA, vaB;
-  uint32_t period;
+  uint16_t period; // Changed to 16-bit
   float frequency;
 };
 
@@ -154,7 +158,7 @@ void setup()
 
   Wire.begin();
   
-  // Initialize SPI with custom pins for ADE7953
+  // Initialize SPI with custom pins for ADE7953 - MODE0
   SPI.begin(ADE_SCK, ADE_MISO, ADE_MOSI, ADE_CS_PIN);
   Serial.println("⚙️  SPI initialized with custom pins:");
   Serial.printf("    MOSI: %d, MISO: %d, SCK: %d, CS: %d\n", 
@@ -204,9 +208,14 @@ void loop()
   // Check for interrupts
   if (adeIRQTriggered)
   {
-    uint32_t irq0 = adeRead24(ADE_IRQ0);
-    uint32_t irq1 = adeRead24(ADE_IRQ1);
-    Serial.printf("⚡ ADE IRQ! Status0: 0x%06X, Status1: 0x%06X\n", irq0, irq1);
+    uint32_t irqA = adeRead24(ADE_IRQSTATA);
+    uint32_t irqB = adeRead24(ADE_IRQSTATB);
+    Serial.printf("⚡ ADE IRQ! StatusA: 0x%06X, StatusB: 0x%06X\n", irqA, irqB);
+    
+    // Clear interrupts (write back to reset registers)
+    adeWrite24(ADE_RSTIRQSTATA, irqA);
+    // adeWrite24(ADE_RSTIRQSTATB, irqB); // If needed
+    
     adeIRQTriggered = false;
   }
 
@@ -241,7 +250,7 @@ bool testRTC()
   if (rtc.lostPower())
   {
     Serial.println("⚠  RTC lost power - setting current time");
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
   DateTime now = rtc.now();
@@ -411,12 +420,16 @@ bool testADE()
   digitalWrite(ADE_CS_PIN, HIGH);
   pinMode(ADE_RST_PIN, OUTPUT);
   digitalWrite(ADE_RST_PIN, HIGH);
+  pinMode(ADE_IRQ_PIN, INPUT_PULLUP);
 
   Serial.printf("✓ ADE7953 pins configured: CS=%d, RST=%d, IRQ=%d\n", 
                 ADE_CS_PIN, ADE_RST_PIN, ADE_IRQ_PIN);
 
   adeReset();
   delay(100);
+
+  // Clear initial IRQ after reset
+  adeWrite32(ADE_RSTIRQSTATA, 0x00100000); // Clear reset bit (bit 20)
 
   // Read Product ID
   uint16_t prodID = adeRead16(ADE_PRODID);
@@ -480,40 +493,49 @@ void adeReset()
   Serial.println("✓ ADE7953 hardware reset");
 }
 
-// ADE INITIALIZATION
+// ADE INITIALIZATION - CORRECTED
 void adeInit()
 {
-  adeWrite16(ADE_CONFIG, 0x0080);
+  // Unlock sequence
+  adeWrite16(ADE_UNLOCK, 0x00AD);
+  delay(10);
+  adeWrite16(ADE_LOCK_REG, 0x0030);
   delay(100);
 
-  // Configure for 50/60Hz line frequency
-  adeWrite16(ADE_LCYCMODE, 0x004F); // Line cycle accumulation mode
+  // Clear LCYCMODE RSTREAD (bit 6=0)
+  adeWrite16(ADE_LCYCMODE, 0x0001); // Line cycle accumulation mode, RSTREAD=0
   adeWrite16(ADE_LINECYC, 200);     // 200 half line cycles
 
   // Enable power calculation
   adeWrite16(ADE_CFMODE, 0x0300); // CF1 = active power, CF2 = reactive
 
-  // Set computation mode
-  adeWrite16(ADE_COMPMODE, 0x01FF); // Enable all measurements
+  // Removed invalid COMPMODE write
+
+  // Original CONFIG write (if needed; check purpose)
+  adeWrite16(ADE_CONFIG, 0x0080);
+  delay(100);
+
+  // Lock SPI interface
+  adeWrite16(ADE_CONFIG, 0x0000);
 
   Serial.printf("✓ ADE configured for %.2f MHz crystal\n", ADE_XTAL_FREQ / 1000000.0);
 }
 
-// ADE INTERRUPT SETUP
+// ADE INTERRUPT SETUP - CORRECTED
 void setupADEInterrupt()
 {
-  pinMode(ADE_IRQ_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ADE_IRQ_PIN), adeISR, FALLING);
 
-  // Enable zero-crossing and cyclic end interrupts
-  adeWrite32(ADE_IRQEN0, 0x00010004); // ZX and CYCEND
-  adeWrite32(ADE_IRQEN1, 0x00000000);
+  // Enable zero-crossing (bit 15) and CYCEND (bit 2) interrupts
+  uint32_t enA = 0x00008004; // ZX (0x8000) + CYCEND (0x0004)
+  adeWrite32(ADE_IRQENA, enA);
+  adeWrite32(ADE_IRQENB, 0x00000000);
 }
 
 // CALIBRATION
 void calibrateADE()
 {
-  // Read current calibration values
+  // Read current calibration values (24-bit, but read as 32 for consistency)
   int32_t avgain = adeRead32s(ADE_AVGAIN);
   int32_t aigain = adeRead32s(ADE_AIGAIN);
 
@@ -592,24 +614,28 @@ void testADEInterrupts()
   }
 }
 
-// READ ADE DATA
+// READ ADE DATA - CORRECTED ADDRESSES
 void readADEData()
 {
   adeData.vrmsA = adeRead24(ADE_AVRMS);
   adeData.vrmsB = adeRead24(ADE_BVRMS);
   adeData.irmsA = adeRead24(ADE_AIRMS);
   adeData.irmsB = adeRead24(ADE_BIRMS);
-  adeData.wattA = adeRead32s(ADE_AWATT);
-  adeData.wattB = adeRead32s(ADE_BWATT);
-  adeData.varA = adeRead32s(ADE_AVAR);
-  adeData.varB = adeRead32s(ADE_BVAR);
+  adeData.wattA = (int32_t)adeRead24(ADE_AWATT); // Signed
+  adeData.wattB = (int32_t)adeRead24(ADE_BWATT);
+  adeData.varA = (int32_t)adeRead24(ADE_AVAR);
+  adeData.varB = (int32_t)adeRead24(ADE_BVAR);
   adeData.vaA = adeRead24(ADE_AVA);
   adeData.vaB = adeRead24(ADE_BVA);
-  adeData.period = adeRead24(ADE_PERIOD);
+  adeData.period = adeRead16(ADE_PERIOD); // 16-bit
 
-  if (adeData.period > 0)
+  // Corrected frequency calculation
+  if (adeData.period != 0)
   {
-    adeData.frequency = (ADE_XTAL_FREQ / 8.0) / adeData.period;
+    float line_period_sec = (1.0 + (float)adeData.period) / 223750.0; // 223.75 kHz clock
+    adeData.frequency = 1.0 / line_period_sec;
+  } else {
+    adeData.frequency = 0.0;
   }
 }
 
@@ -628,68 +654,86 @@ void displayADEData()
   Serial.println("└──────────────────────────────────────────────┘\n");
 }
 
-// ADE SPI READ FUNCTIONS
+// ADE SPI READ FUNCTIONS - CORRECTED PROTOCOL (MODE0)
 uint16_t adeRead16(uint16_t reg)
 {
-  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE3));
+  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE0));
   digitalWrite(ADE_CS_PIN, LOW);
 
-  SPI.transfer((reg >> 4) & 0xFF);
-  SPI.transfer((reg << 4) & 0xFF);
+  uint8_t addr_h = (reg >> 8) & 0xFF;
+  uint8_t addr_l = reg & 0xFF;
+  SPI.transfer(addr_h);
+  SPI.transfer(addr_l);
+  SPI.transfer(0x80); // Read command
 
-  uint16_t value = ((uint16_t)SPI.transfer(0x00) << 8);
-  value |= SPI.transfer(0x00);
+  uint8_t high = SPI.transfer(0x00);
+  uint8_t low = SPI.transfer(0x00);
 
   digitalWrite(ADE_CS_PIN, HIGH);
   SPI.endTransaction();
-  return value;
+  return ((uint16_t)high << 8) | low;
 }
 
 uint32_t adeRead24(uint16_t reg)
 {
-  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE3));
+  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE0));
   digitalWrite(ADE_CS_PIN, LOW);
 
-  SPI.transfer((reg >> 4) & 0xFF);
-  SPI.transfer((reg << 4) & 0xFF);
+  uint8_t addr_h = (reg >> 8) & 0xFF;
+  uint8_t addr_l = reg & 0xFF;
+  SPI.transfer(addr_h);
+  SPI.transfer(addr_l);
+  SPI.transfer(0x80); // Read command
 
-  uint32_t value = 0;
-  value |= ((uint32_t)SPI.transfer(0x00)) << 16;
-  value |= ((uint32_t)SPI.transfer(0x00)) << 8;
-  value |= SPI.transfer(0x00);
+  uint8_t b2 = SPI.transfer(0x00); // MSB
+  uint8_t b1 = SPI.transfer(0x00);
+  uint8_t b0 = SPI.transfer(0x00); // LSB
 
   digitalWrite(ADE_CS_PIN, HIGH);
   SPI.endTransaction();
-  return value;
+  return ((uint32_t)b2 << 16) | ((uint32_t)b1 << 8) | b0;
 }
 
 int32_t adeRead32s(uint16_t reg)
 {
-  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE3));
+  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE0));
   digitalWrite(ADE_CS_PIN, LOW);
 
-  SPI.transfer((reg >> 4) & 0xFF);
-  SPI.transfer((reg << 4) & 0xFF);
+  uint8_t addr_h = (reg >> 8) & 0xFF;
+  uint8_t addr_l = reg & 0xFF;
+  SPI.transfer(addr_h);
+  SPI.transfer(addr_l);
+  SPI.transfer(0x80); // Read command
 
   int32_t value = 0;
-  value |= ((int32_t)SPI.transfer(0x00)) << 24;
-  value |= ((int32_t)SPI.transfer(0x00)) << 16;
-  value |= ((int32_t)SPI.transfer(0x00)) << 8;
-  value |= SPI.transfer(0x00);
+  int8_t b3 = (int8_t)SPI.transfer(0x00); // Sign extend MSB
+  uint8_t b2 = SPI.transfer(0x00);
+  uint8_t b1 = SPI.transfer(0x00);
+  uint8_t b0 = SPI.transfer(0x00);
 
   digitalWrite(ADE_CS_PIN, HIGH);
   SPI.endTransaction();
+  value = ((int32_t)b3 << 24) | ((uint32_t)b2 << 16) | ((uint32_t)b1 << 8) | b0;
   return value;
 }
 
-// ADE SPI WRITE FUNCTIONS
+// Helper for 24-bit write (using 32-bit with upper=0)
+void adeWrite24(uint16_t reg, uint32_t value)
+{
+  adeWrite32(reg, value & 0x00FFFFFF);
+}
+
+// ADE SPI WRITE FUNCTIONS - CORRECTED
 void adeWrite16(uint16_t reg, uint16_t value)
 {
-  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE3));
+  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE0));
   digitalWrite(ADE_CS_PIN, LOW);
 
-  SPI.transfer((reg >> 4) & 0xFF | 0x80); // MSB with write bit
-  SPI.transfer((reg << 4) & 0xFF);
+  uint8_t addr_h = (reg >> 8) & 0xFF;
+  uint8_t addr_l = reg & 0xFF;
+  SPI.transfer(addr_h);
+  SPI.transfer(addr_l);
+  SPI.transfer(0x00); // Write command
   SPI.transfer((value >> 8) & 0xFF);
   SPI.transfer(value & 0xFF);
 
@@ -699,11 +743,14 @@ void adeWrite16(uint16_t reg, uint16_t value)
 
 void adeWrite32(uint16_t reg, uint32_t value)
 {
-  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE3));
+  SPI.beginTransaction(SPISettings(ADE_SPI_SPEED, MSBFIRST, SPI_MODE0));
   digitalWrite(ADE_CS_PIN, LOW);
 
-  SPI.transfer((reg >> 4) & 0xFF | 0x80);
-  SPI.transfer((reg << 4) & 0xFF);
+  uint8_t addr_h = (reg >> 8) & 0xFF;
+  uint8_t addr_l = reg & 0xFF;
+  SPI.transfer(addr_h);
+  SPI.transfer(addr_l);
+  SPI.transfer(0x00); // Write command
   SPI.transfer((value >> 24) & 0xFF);
   SPI.transfer((value >> 16) & 0xFF);
   SPI.transfer((value >> 8) & 0xFF);
